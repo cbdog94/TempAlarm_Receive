@@ -1,0 +1,4 @@
+"STARTUP.obj",
+"Main.obj" 
+TO "TempAlarm_Rec" 
+PRINT(".\Listings\TempAlarm_Rec.m51")

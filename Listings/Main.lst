@@ -1,0 +1,255 @@
+C51 COMPILER V9.54   MAIN                                                                  09/12/2015 22:38:25 PAGE 1   
+
+
+C51 COMPILER V9.54, COMPILATION OF MODULE MAIN
+OBJECT MODULE PLACED IN Main.OBJ
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE Main.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND PRINT(.\Listings\Main
+                    -.lst) TABS(2)
+
+line level    source
+
+   1          #include "STC15F2K60S2.H"
+   2          
+   3          /**********************
+   4          引脚别名定义
+   5          ***********************/
+   6          sbit LED_SEL = P2^3;            //数码管和LED的选择信号
+   7          sbit beep = P3^4;               //蜂鸣器
+   8          sbit KEY1 = P3^2;               //按键1  温度减
+   9          sbit KEY2 = P3^3;               //按键2  温度加
+  10          sbit KEY3 = P1^7;               //按键3  切换模式
+  11          
+  12          
+  13          /**********************
+  14          全局变量定义
+  15          ***********************/
+  16          unsigned int receive_buf = 11;        //接收缓冲，用于收发标志0xca的判断
+  17          unsigned int receive_data = 20;       //接受的数据
+  18              
+  19          unsigned int temp=20;                 //实际温度
+  20          unsigned int tempset=30;              //显示设定温度
+  21          unsigned int tempset_h=30;            //高温设定
+  22          unsigned int tempset_l=10;            //低温设定
+  23          unsigned int mode=1;                  //高低温显示,1为高温,0为低温
+  24          unsigned int Status=1;                    //警报状态,1为正常状态,0为警报状态
+  25          
+  26          unsigned int position = 1;      //数码管显示位
+  27          unsigned char segtable[]={0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f,0x77,0x7c,0x39,0x5e,0x79,0x71,
+             -0x76,0x38};//段选
+  28          unsigned char weixuan[]={0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07};//位选
+  29          /**********************
+  30          函数声明(中断函数除外)
+  31          ***********************/
+  32          void TimerInit();     //定时器设置
+  33          void UartInit();      //串口1设置
+  34          void init();          //初始化，推挽，设置中断开关
+  35          void Delay(int n);
+  36          
+  37          /********************************
+  38           * 延时函数
+  39          ********************************/
+  40          void Delay(int n)
+  41          {
+  42   1        int y;
+  43   1        while(n--)
+  44   1        {
+  45   2          y=60;
+  46   2          while(y--);
+  47   2        }
+  48   1      }
+  49          
+  50          /********************************
+  51           * 设置推挽，中断开关设置
+  52          ********************************/
+  53          void init()
+C51 COMPILER V9.54   MAIN                                                                  09/12/2015 22:38:25 PAGE 2   
+
+  54          {
+  55   1        //设置推挽输出
+  56   1        P0M1 = 0x00;
+  57   1        P0M0 = 0xff;
+  58   1        P2M1 = 0x00;
+  59   1        P2M0 = 0x08;
+  60   1        P3M1 = 0x00;
+  61   1        P3M0 = 0x10;    
+  62   1        ET1 = 0;      //禁止T1中断
+  63   1        ET0 = 1;      //打开定时器T0中断
+  64   1        ES = 1;       //打开串口1中断
+  65   1        IE2 = 0X04;   //打开定时器2中断
+  66   1        EA = 1;       //打开总中断
+  67   1      }
+  68          
+  69          /********************************
+  70           * 串口1的相关设置
+  71          ********************************/
+  72          void UartInit()
+  73          { 
+  74   1        PCON &= 0x7F;   //波特率不倍速，SMOD=0
+  75   1        SCON = 0x50;    //串口1使用工作方式1，REN=1(允许串行接收)
+  76   1        AUXR &= 0xFE;   //串口1选择定时器T1作为波特率发生器，S1ST2=0
+  77   1        AUXR1 = 0x40;   //串口1在P3.6接收，在P3.7发送
+  78   1        PS = 1;         //设置串口中断为最高优先级
+  79   1      }
+  80          
+  81          /********************************
+  82           * 定时器的相关设置
+  83          ********************************/
+  84          void TimerInit()  
+  85          {
+  86   1        AUXR |= 0x40;   //定时器T1为1T模式，速度是传统8051的12倍，不分频。
+  87   1        TMOD &= 0x0F;   //清除T1模式位
+  88   1        TMOD |= 0x20;   //设置T1模式位，使用8位自动重装模式
+  89   1        TL1 = 0x70;     //设置初值
+  90   1        TH1 = 0x70;     //设置T1重装值
+  91   1        TR1 = 1;        //T1运行控制位置1，允许T1计数
+  92   1        
+  93   1        AUXR |= 0x80;   //定时器T0为1T模式，的速度是传统8051的12倍，不分频。
+  94   1        TMOD &= 0xF0;           //设置定时器模式为16位自动重装
+  95   1        TL0 = 0xCD;             //设置定时初值
+  96   1        TH0 = 0xF4;             //设置定时初值
+  97   1        TF0 = 0;                //清除TF0标志
+  98   1        TF0 = 0;        //T0溢出标志位清零
+  99   1        TR0 = 1;        //T0运行控制位置1，允许T0计数
+ 100   1        
+ 101   1      //定时器T2为12T模式，用于数码管显示
+ 102   1        T2L = (65536-2500)%256;     //低位重装值
+ 103   1        T2H = (65536-2500)/256;     //高位重装值
+ 104   1        AUXR |= 0x10;   //定时器2开始计时
+ 105   1      }
+ 106          
+ 107          
+ 108          
+ 109          
+ 110          /********************************
+ 111           * 定时器0中断的操作，用于蜂鸣器
+ 112          ********************************/
+ 113          void Time0() interrupt 1
+ 114          {
+ 115   1        if(Status&&(temp>=tempset_h||temp<=tempset_l))
+C51 COMPILER V9.54   MAIN                                                                  09/12/2015 22:38:25 PAGE 3   
+
+ 116   1          beep=~beep;
+ 117   1      }
+ 118          
+ 119          /********************************
+ 120          * 串口1中断的操作。接收完毕RI值1，产生中断
+ 121          ********************************/
+ 122          void URAT1() interrupt 4
+ 123          {
+ 124   1        if(RI)              //判断是否接收中断
+ 125   1        {
+ 126   2          RI = 0;           //接收中断请求标志位清0
+ 127   2          if(receive_buf == 0xca) //判断上一次是否收到0xca标志
+ 128   2          {
+ 129   3            receive_data = SBUF;  //正式接收数据
+ 130   3            if(receive_data/10<10) //抛弃一部分异常数据
+ 131   3              temp=receive_data;
+ 132   3          }
+ 133   2          receive_buf = SBUF;     //把这次接收到的数据存入自定义的缓存中，等待下一次的比较
+ 134   2        }
+ 135   1      }
+ 136          
+ 137          /********************************
+ 138          * 定时器2中断的操作。用于显示数码管和LED灯
+ 139          ********************************/
+ 140          void Timer2() interrupt 12
+ 141          {
+ 142   1        LED_SEL=0;
+ 143   1        position++;
+ 144   1        if(position==8) 
+ 145   1          position=0;
+ 146   1        P2=weixuan[position];
+ 147   1        switch(position)
+ 148   1        {
+ 149   2          case 1:P0=segtable[temp/10];break; 
+ 150   2          case 2:P0=segtable[temp%10];break; 
+ 151   2          case 4:P0=(mode?segtable[16]:segtable[17]);break; 
+ 152   2          case 5:P0=segtable[tempset%1000/100];break; 
+ 153   2          case 6:P0=segtable[tempset%100/10];break; 
+ 154   2          case 7:P0=segtable[tempset%10];break; 
+ 155   2          default:P0=0x00;break; 
+ 156   2        } 
+ 157   1        Delay(10);
+ 158   1        P0=0x00;
+ 159   1        
+ 160   1        if(Status&&(temp>=tempset_h||temp<=tempset_l))//处于报警状态时交替显示数码管和LED灯
+ 161   1        {
+ 162   2          LED_SEL=1;
+ 163   2          P0=0xff;
+ 164   2          Delay(1);
+ 165   2          P0=0x00;
+ 166   2          LED_SEL=0;
+ 167   2        }
+ 168   1      }
+ 169          
+ 170          
+ 171          /********************************
+ 172           * 主函数
+ 173          ********************************/
+ 174          void main()
+ 175          {
+ 176   1        TimerInit();    //设置定时器
+ 177   1        UartInit();     //设置串口1
+C51 COMPILER V9.54   MAIN                                                                  09/12/2015 22:38:25 PAGE 4   
+
+ 178   1        init();         //初始化
+ 179   1        while(1){
+ 180   2        if(KEY2==0)  //警报温度+1
+ 181   2        {
+ 182   3          Delay(20);
+ 183   3          if(KEY2==0)
+ 184   3          {
+ 185   4            while(KEY2==0);
+ 186   4            if(mode) 
+ 187   4              tempset_h+=1;
+ 188   4            else 
+ 189   4              tempset_l+=1;
+ 190   4          }
+ 191   3        }
+ 192   2        if(KEY1==0)  //警报温度-1
+ 193   2        {
+ 194   3          Delay(20);
+ 195   3          if(KEY1==0)
+ 196   3          {
+ 197   4            while(KEY1==0);
+ 198   4            if(mode) 
+ 199   4              tempset_h-=1;
+ 200   4            else 
+ 201   4              tempset_l-=1;
+ 202   4          }
+ 203   3        }
+ 204   2        if(KEY3==0)  //高低温切换
+ 205   2        {
+ 206   3          Delay(20);
+ 207   3          if(KEY3==0)
+ 208   3          {
+ 209   4            while(KEY3==0);
+ 210   4            if(Status&&(temp>=tempset_h||temp<=tempset_l)) 
+ 211   4              Status=0;
+ 212   4            else
+ 213   4              mode=!mode; 
+ 214   4          } //改变高低温状态变量
+ 215   3        }
+ 216   2        if(mode)     //改变设定温度
+ 217   2          tempset=tempset_h;
+ 218   2        else 
+ 219   2          tempset=tempset_l;
+ 220   2        if(temp<tempset_h&&temp>tempset_l) //改变报警状态
+ 221   2          Status=1; 
+ 222   2        }
+ 223   1      }
+ 224          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    701    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     44    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
